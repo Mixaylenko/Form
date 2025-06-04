@@ -4,9 +4,7 @@ using Polly;
 using Polly.Extensions.Http;
 using System.Net.Security;
 using System.Security.Authentication;
-using System.Net.Http.Headers; // Для CacheControlHeaderValue
-using Microsoft.AspNetCore.Http;
-using ClientForm.Services; // Для SameSiteMode
+using System.Net.Http.Headers; 
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -50,7 +48,6 @@ builder.Services.AddHttpClient("ServerAPI", client =>
 .AddPolicyHandler(Policy.TimeoutAsync<HttpResponseMessage>(TimeSpan.FromSeconds(10)));
 
 // 3. Регистрация сервисов
-builder.Services.AddScoped<IReportApiService, ReportApiService>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddAntiforgery(options =>
@@ -124,6 +121,7 @@ app.Use(async (context, next) =>
 {
     context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
     context.Response.Headers.Append("X-Frame-Options", "DENY");
+    await next(); 
 });
 
 app.MapRazorPages();

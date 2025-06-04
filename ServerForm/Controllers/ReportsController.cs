@@ -1,171 +1,90 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using ServerForm.Models;
 using ServerForm.Interfaces;
-using System.Text;
+using ServerForm.Models;
+using System.IO;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+using System.Collections.Generic;
 
 namespace ServerForm.Controllers
 {
-    [Route("api/[controller]")]
     [ApiController]
+    [Route("api/[controller]")]
     public class ReportsController : ControllerBase
     {
-        private readonly IWebHostEnvironment _env;
         private readonly IReportService _reportService;
-        private readonly DatabaseContext _context;
-        private readonly string _uploadsPath;
 
-        public ReportsController(
-            IWebHostEnvironment env,
-            IReportService reportService,
-            DatabaseContext context)
+        public ReportsController(IReportService reportService)
         {
-            _reportService = reportService ?? throw new ArgumentNullException(nameof(reportService));
-            _context = context ?? throw new ArgumentNullException(nameof(context));
-            _env = env ?? throw new ArgumentNullException(nameof(env));
-
-            _uploadsPath = Path.Combine(_env.WebRootPath, "uploads");
-            Directory.CreateDirectory(_uploadsPath);
+            _reportService = reportService;
         }
 
         [HttpGet]
         public async Task<ActionResult<IEnumerable<ReportData>>> GetReports()
         {
-            var reports = await _reportService.GetAllReportsAsync();
-            return Ok(reports);
+            return Ok(await _reportService.GetAllReportsAsync());
         }
 
         [HttpGet("{id}")]
         public async Task<ActionResult<ReportData>> GetReport(int id)
         {
-            try
-            {
-                var report = await _reportService.GetReportAsync(id);
-                return Ok(report);
-            }
-            catch (KeyNotFoundException)
-            {
-                return NotFound($"Report with ID {id} not found.");
-            }
+            var report = await _reportService.GetReportAsync(id);
+            return report != null ? Ok(report) : NotFound();
         }
 
         [HttpPost]
-        [DisableRequestSizeLimit]
-        public async Task<ActionResult<ReportData>> CreateReport([FromForm] ReportModel model)
+        public async Task<ActionResult<ReportData>> CreateReport(
+            [FromForm] string name,
+            IFormFile file)
         {
-            if (model?.File == null || model.File.Length == 0)
-                return BadRequest("No file uploaded.");
+            if (file == null || file.Length == 0)
+                return BadRequest("File is required");
 
-            try
-            {
-                var report = await _reportService.CreateReportAsync(model.Name, model.File);
-                return CreatedAtAction(
-                    nameof(GetReport),
-                    new { id = report.Id },
-                    report);
-            }
-            catch (ArgumentException ex)
-            {
-                return BadRequest(ex.Message);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
-            }
+            var report = new ReportData { Name = name, FileName = file.FileName };
+            using var stream = file.OpenReadStream();
+            var created = await _reportService.CreateReportAsync(report, stream);
+            return CreatedAtAction(nameof(GetReport), new { id = created.Id }, created);
         }
 
         [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateReport(int id, [FromBody] ReportData reportData)
+        public async Task<IActionResult> UpdateReport(
+            int id,
+            [FromForm] string name,
+            IFormFile file = null)
         {
-            if (id != reportData.Id)
-                return BadRequest("ID mismatch");
+            var report = new ReportData { Name = name };
+            Stream stream = file != null ? file.OpenReadStream() : null;
 
-            try
-            {
-                await _reportService.UpdateReportAsync(reportData);
-                return NoContent();
-            }
-            catch (KeyNotFoundException)
-            {
-                return NotFound($"Report with ID {id} not found.");
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
-            }
+            var updated = await _reportService.UpdateReportAsync(id, report, stream);
+            return updated != null ? NoContent() : NotFound();
         }
 
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteReport(int id)
         {
-            try
-            {
-                await _reportService.DeleteReportAsync(id);
-                return NoContent();
-            }
-            catch (KeyNotFoundException)
-            {
-                return NotFound($"Report with ID {id} not found.");
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
-            }
+            await _reportService.DeleteReportAsync(id);
+            return NoContent();
         }
 
-        [HttpGet("view/{id}")]
-        public async Task<ActionResult> ViewExcel(int id)
+        [HttpGet("{id}/download")]
+        public async Task<IActionResult> DownloadReport(int id)
         {
-            try
-            {
-                var report = await _reportService.GetReportAsync(id);
-                var content = _reportService.GetExcelContent(report);
-                return Content(content, "text/plain", Encoding.UTF8);
-            }
-            catch (KeyNotFoundException)
-            {
-                return NotFound($"Report with ID {id} not found.");
-            }
-            catch (FileNotFoundException)
-            {
-                return NotFound("File not found.");
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
-            }
+            var report = await _reportService.GetReportAsync(id);
+            if (report == null) return NotFound();
+
+            var fileBytes = await System.IO.File.ReadAllBytesAsync(report.FilePath);
+            return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", report.FileName);
         }
 
-        [HttpGet("Download/{id}")]
-        public async Task<IActionResult> Download(int id)
+        [HttpGet("{id}/convert-to-word")]
+        public async Task<IActionResult> ConvertToWord(int id)
         {
-            try
-            {
-                var report = await _reportService.GetReportAsync(id);
-                var fileStream = _reportService.GetExcelFileStream(report);
+            var wordBytes = await _reportService.ConvertToWordAsync(id);
+            if (wordBytes == null) return NotFound();
 
-                return File(
-                    fileStream,
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    report.FileName);
-            }
-            catch (KeyNotFoundException)
-            {
-                return NotFound($"Report with ID {id} not found.");
-            }
-            catch (FileNotFoundException)
-            {
-                return NotFound("File not found.");
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
-            }
-        }
-
-        public class ReportModel
-        {
-            public string Name { get; set; }
-            public IFormFile File { get; set; }
+            var report = await _reportService.GetReportAsync(id);
+            var fileName = Path.GetFileNameWithoutExtension(report.FileName) + ".docx";
+            return File(wordBytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", fileName);
         }
     }
 }

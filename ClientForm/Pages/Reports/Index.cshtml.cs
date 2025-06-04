@@ -1,45 +1,28 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using ClientForm.Services;
 using ServerForm.Models;
-using ClientForm.Pages.Reports; // Добавьте это
 
 namespace ClientForm.Pages.Reports
 {
     public class IndexModel : PageModel
     {
-        private readonly IReportApiService _reportService;
-        private readonly ILogger<IndexModel> _logger;
+        private readonly HttpClient _httpClient;
+        private readonly string _apiBaseUrl;
 
-        public IndexModel(
-            IReportApiService reportService,
-            ILogger<IndexModel> logger)
+        public List<ReportData> Reports { get; set; } = new();
+
+        public IndexModel(IHttpClientFactory httpClientFactory, IConfiguration configuration)
         {
-            _reportService = reportService;
-            _logger = logger;
+            _httpClient = httpClientFactory.CreateClient();
+            _apiBaseUrl = configuration["ApiBaseUrl"];
         }
-
-        public IEnumerable<ReportData> Reports { get; set; }
 
         public async Task OnGetAsync()
         {
-            try
+            var response = await _httpClient.GetAsync($"{_apiBaseUrl}/api/reports");
+            if (response.IsSuccessStatusCode)
             {
-                var serverReports = await _reportService.GetAllReportsAsync();
-                Reports = serverReports.Select(r => new ReportData
-                {
-                    Id = r.Id,
-                    Name = r.Name,
-                    FileName = r.FileName,
-                    FilePath = r.FilePath
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error loading reports");
-                Reports = Enumerable.Empty<ReportData>();
+                Reports = await response.Content.ReadFromJsonAsync<List<ReportData>>();
             }
         }
-
     }
 }

@@ -1,192 +1,139 @@
-using ClientForm.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using OfficeOpenXml;
+using System.Drawing;
+using System.Drawing.Imaging;
+using OfficeOpenXml.Drawing.Chart;
 using OfficeOpenXml.Drawing;
-using DocumentFormat.OpenXml;
-using DocumentFormat.OpenXml.Packaging;
-using DocumentFormat.OpenXml.Wordprocessing;
-using System.IO;
+using ServerForm.Models;
 
 namespace ClientForm.Pages.Reports
 {
     public class DetailsModel : PageModel
     {
-        public HttpClient _httpClient { get; }
-
-        [BindProperty(SupportsGet = true)]
-        public int Id { get; set; }
+        private readonly IWebHostEnvironment _env;
+        private readonly HttpClient _httpClient;
+        private readonly string _apiBaseUrl;
 
         public ReportData Report { get; set; }
-        public bool IsExcel { get; set; }
-        public List<ExcelWorksheetModel> Worksheets { get; set; } = new();
+        public List<WorksheetModel> Worksheets { get; set; } = new();
 
-        public DetailsModel(IHttpClientFactory httpClientFactory)
+        public DetailsModel(
+            IHttpClientFactory httpClientFactory,
+            IConfiguration configuration,
+            IWebHostEnvironment env)
         {
-            _httpClient = httpClientFactory.CreateClient("ServerAPI");
-            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+            _httpClient = httpClientFactory.CreateClient();
+            _apiBaseUrl = configuration["ApiBaseUrl"];
+            _env = env;
+            ExcelPackage.LicenseContext = OfficeOpenXml.LicenseContext.NonCommercial;
         }
 
-        public async Task<IActionResult> OnGetAsync()
+        public async Task<IActionResult> OnGetAsync(int id)
         {
-            var response = await _httpClient.GetAsync($"api/reports/{Id}");
-            if (!response.IsSuccessStatusCode)
-            {
-                return NotFound();
-            }
+            var response = await _httpClient.GetAsync($"{_apiBaseUrl}/api/reports/{id}");
+            if (!response.IsSuccessStatusCode) return NotFound();
 
             Report = await response.Content.ReadFromJsonAsync<ReportData>();
-            IsExcel = Report.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) ||
-                      Report.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase);
+            if (Report == null) return NotFound();
 
-            if (IsExcel)
+            var filePath = Path.Combine(_env.WebRootPath, "uploads", Report.FileName);
+
+            // Проверка существования файла
+            if (!System.IO.File.Exists(filePath))
             {
-                await LoadExcelData();
+                ModelState.AddModelError(string.Empty, "Файл отчета не найден");
+                return Page();
+            }
+
+            using var package = new ExcelPackage(new FileInfo(filePath));
+
+            foreach (var worksheet in package.Workbook.Worksheets)
+            {
+                var model = new WorksheetModel
+                {
+                    Name = worksheet.Name,
+                    TableData = new List<List<string>>(),
+                    Images = new List<ImageModel>()
+                };
+
+                // Обработка табличных данных
+                if (worksheet.Dimension != null)
+                {
+                    // Ограничим размер для безопасности
+                    int maxRows = Math.Min(worksheet.Dimension.End.Row, 100);
+                    int maxCols = Math.Min(worksheet.Dimension.End.Column, 20);
+
+                    for (int row = 1; row <= maxRows; row++)
+                    {
+                        var rowData = new List<string>();
+                        for (int col = 1; col <= maxCols; col++)
+                        {
+                            rowData.Add(worksheet.Cells[row, col].Text);
+                        }
+                        model.TableData.Add(rowData);
+                    }
+                }
+
+                // Обработка графиков - ИСПРАВЛЕННАЯ ЧАСТЬ
+                foreach (var drawing in worksheet.Drawings)
+                {
+                    if (drawing is ExcelChart chart) // Исправлено здесь
+                    {
+                        using var image = ConvertChartToImage(chart);
+                        using var ms = new MemoryStream();
+                        image.Save(ms, ImageFormat.Png);
+                        model.Images.Add(new ImageModel
+                        {
+                            Data = ms.ToArray(),
+                            AltText = chart.Name
+                        });
+                    }
+                    else if (drawing is ExcelPicture picture)
+                    {
+                        // Обработка обычных изображений
+                        using var ms = new MemoryStream();
+                        picture.Image.Save(ms, ImageFormat.Png);
+                        model.Images.Add(new ImageModel
+                        {
+                            Data = ms.ToArray(),
+                            AltText = picture.Name
+                        });
+                    }
+                }
+
+                Worksheets.Add(model);
             }
 
             return Page();
         }
 
-        public async Task<IActionResult> OnPostConvertToWordAsync()
+        // Исправленная сигнатура метода
+        private Bitmap ConvertChartToImage(ExcelChart chart) // Исправлено здесь
         {
-            var response = await _httpClient.GetAsync($"api/reports/download/{Id}");
-            if (!response.IsSuccessStatusCode)
-            {
-                return NotFound();
-            }
+            var bitmap = new Bitmap(600, 400);
+            using var g = Graphics.FromImage(bitmap);
+            g.Clear(Color.White);
+            g.DrawString(chart.Name, new Font("Arial", 14), Brushes.Black, 10, 10);
 
-            using var stream = await response.Content.ReadAsStreamAsync();
-            using var package = new ExcelPackage(stream);
+            // Простая визуализация для примера
+            g.DrawRectangle(Pens.Black, 50, 50, 500, 300);
+            g.DrawString("Chart Placeholder", new Font("Arial", 20), Brushes.Blue, 100, 150);
 
-            // Создаем временный файл Word
-            var tempWordFile = Path.GetTempFileName() + ".docx";
-
-            // Конвертируем первый лист Excel в Word
-            if (package.Workbook.Worksheets.Count > 0)
-            {
-                ConvertExcelToWord(package.Workbook.Worksheets[0], tempWordFile);
-            }
-
-            // Возвращаем файл пользователю
-            var fileStream = new FileStream(tempWordFile, FileMode.Open);
-            return File(fileStream, "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                       Path.GetFileNameWithoutExtension(Report.FileName) + ".docx");
+            return bitmap;
         }
 
-        private void ConvertExcelToWord(ExcelWorksheet worksheet, string wordFilePath)
+        public class WorksheetModel
         {
-            // Создаем Word документ
-            using (WordprocessingDocument wordDocument = WordprocessingDocument.Create(wordFilePath, WordprocessingDocumentType.Document))
-            {
-                // Добавляем главную часть документа
-                MainDocumentPart mainPart = wordDocument.AddMainDocumentPart();
-                mainPart.Document = new Document();
-                Body body = mainPart.Document.AppendChild(new Body());
-
-                // Создаем таблицу в Word
-                if (worksheet.Dimension != null)
-                {
-                    Table wordTable = new Table();
-
-                    int rowCount = Math.Min(worksheet.Dimension.Rows, 100);
-                    int colCount = Math.Min(worksheet.Dimension.Columns, 20);
-
-                    for (int row = 1; row <= rowCount; row++)
-                    {
-                        TableRow wordRow = new TableRow();
-
-                        for (int col = 1; col <= colCount; col++)
-                        {
-                            TableCell wordCell = new TableCell();
-                            wordCell.Append(new Paragraph(new Run(new Text(worksheet.Cells[row, col].Text))));
-                            wordCell.Append(new TableCellProperties(
-                                new TableCellWidth { Type = TableWidthUnitValues.Auto }));
-                            wordRow.Append(wordCell);
-                        }
-
-                        wordTable.Append(wordRow);
-                    }
-
-                    body.Append(wordTable);
-                }
-
-                mainPart.Document.Save();
-            }
+            public string Name { get; set; }
+            public List<List<string>> TableData { get; set; }
+            public List<ImageModel> Images { get; set; }
         }
 
-        private async Task LoadExcelData()
+        public class ImageModel
         {
-            try
-            {
-                var response = await _httpClient.GetAsync($"api/reports/download/{Id}");
-                if (!response.IsSuccessStatusCode) return;
-
-                using var stream = await response.Content.ReadAsStreamAsync();
-                using var package = new ExcelPackage(stream);
-
-                foreach (var worksheet in package.Workbook.Worksheets)
-                {
-                    var model = new ExcelWorksheetModel
-                    {
-                        Name = worksheet.Name,
-                        Images = new List<ExcelImageModel>(),
-                        TableData = new List<List<string>>()
-                    };
-
-                    // Получаем данные таблицы
-                    if (worksheet.Dimension != null)
-                    {
-                        int rowCount = Math.Min(worksheet.Dimension.Rows, 100);
-                        int colCount = Math.Min(worksheet.Dimension.Columns, 20);
-
-                        for (int row = 1; row <= rowCount; row++)
-                        {
-                            var currentRow = new List<string>();
-                            for (int col = 1; col <= colCount; col++)
-                            {
-                                currentRow.Add(worksheet.Cells[row, col].Text);
-                            }
-                            model.TableData.Add(currentRow);
-                        }
-                    }
-
-                    // Получаем изображения
-                    foreach (var drawing in worksheet.Drawings)
-                    {
-                        if (drawing is ExcelPicture picture)
-                        {
-                            using var ms = new MemoryStream();
-                            picture.Image.Save(ms, picture.Image.RawFormat);
-                            model.Images.Add(new ExcelImageModel
-                            {
-                                ImageData = ms.ToArray(),
-                                Format = picture.Image.RawFormat.ToString(),
-                                Name = picture.Name
-                            });
-                        }
-                    }
-
-                    Worksheets.Add(model);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error loading Excel data: {ex.Message}");
-            }
+            public byte[] Data { get; set; }
+            public string AltText { get; set; }
         }
-    }
-
-    public class ExcelWorksheetModel
-    {
-        public string Name { get; set; }
-        public List<List<string>> TableData { get; set; }
-        public List<ExcelImageModel> Images { get; set; }
-    }
-
-    public class ExcelImageModel
-    {
-        public byte[] ImageData { get; set; }
-        public string Format { get; set; }
-        public string Name { get; set; }
     }
 }

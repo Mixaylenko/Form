@@ -1,16 +1,17 @@
 ﻿using ServerForm.Models;
-using ServerForm.Services;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading.Tasks;
 
 namespace ServerForm.Interfaces
 {
     public interface IReportService
     {
-        Task<ReportData> CreateReportAsync(string name, IFormFile file);
-        Task DeleteReportAsync(int id);
-        Task<ReportData> GetReportAsync(int id);
+        Task<ReportData> CreateReportAsync(ReportData report, Stream fileStream);
         Task<IEnumerable<ReportData>> GetAllReportsAsync();
-        Task<ReportData> UpdateReportAsync(ReportData reportData);
-        string GetExcelContent(ReportData reportData);
-        FileStream GetExcelFileStream(ReportData reportData);
+        Task<ReportData> GetReportAsync(int id);
+        Task<ReportData> UpdateReportAsync(int id, ReportData report, Stream fileStream = null);
+        Task DeleteReportAsync(int id);
+        Task<byte[]> ConvertToWordAsync(int id);
     }
 }

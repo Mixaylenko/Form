@@ -1,178 +1,243 @@
-﻿using System.Text;
-using OfficeOpenXml;
-using Microsoft.EntityFrameworkCore;
+﻿using ServerForm.Interfaces;
 using ServerForm.Models;
-using System.IO;
-using ServerForm.Interfaces;
+using OfficeOpenXml;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
+using System.Drawing;
+using System.Drawing.Imaging;
+using Microsoft.EntityFrameworkCore;
+using OfficeOpenXml.Drawing.Chart;
+using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using A = DocumentFormat.OpenXml.Drawing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 using OfficeOpenXml.Drawing;
-using Microsoft.AspNetCore.Mvc;
 
 namespace ServerForm.Services
 {
     public class ReportService : IReportService
     {
         private readonly DatabaseContext _context;
-        private readonly IWebHostEnvironment _hostingEnvironment;
+        private readonly IWebHostEnvironment _env;
         private readonly string _uploadsPath;
 
-        static ReportService()
+        public ReportService(DatabaseContext context, IWebHostEnvironment env)
         {
-            // Установка лицензии EPPlus (для версий 5+)
-            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
-
-            // Альтернативный вариант для версий 4.x
-            // ExcelPackage.LicenseContext = OfficeOpenXml.LicenseContext.NonCommercial;
+            _context = context;
+            _env = env;
+            _uploadsPath = Path.Combine(_env.WebRootPath, "uploads");
+            Directory.CreateDirectory(_uploadsPath);
+            ExcelPackage.LicenseContext = OfficeOpenXml.LicenseContext.NonCommercial;
         }
 
-        public ReportService(DatabaseContext context, IWebHostEnvironment hostingEnvironment)
+        public async Task<ReportData> CreateReportAsync(ReportData report, Stream fileStream)
         {
-            try
+            var fileName = $"{Guid.NewGuid()}{Path.GetExtension(report.FileName)}";
+            var filePath = Path.Combine(_uploadsPath, fileName);
+
+            using (var fs = new FileStream(filePath, FileMode.Create))
             {
-                _context = context ?? throw new ArgumentNullException(nameof(context));
-                _hostingEnvironment = hostingEnvironment ?? throw new ArgumentNullException(nameof(hostingEnvironment));
-                _uploadsPath = Path.Combine(_hostingEnvironment.WebRootPath, "uploads");
-
-                if (!Directory.Exists(_uploadsPath))
-                {
-                    Directory.CreateDirectory(_uploadsPath);
-                }
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException("Failed to initialize ReportService", ex);
-            }
-        }
-
-        // Остальные методы класса остаются без изменений
-        public async Task<ReportData> CreateReportAsync(string name, IFormFile file)
-        {
-            if (file == null || file.Length == 0)
-                throw new ArgumentException("No file uploaded.");
-
-            var uniqueFileName = $"{Guid.NewGuid()}{Path.GetExtension(file.FileName)}";
-            var filePath = Path.Combine(_uploadsPath, uniqueFileName);
-
-            using (var fileStream = new FileStream(filePath, FileMode.Create))
-            {
-                await file.CopyToAsync(fileStream);
+                await fileStream.CopyToAsync(fs);
             }
 
-            var reportData = new ReportData
-            {
-                FileName = file.FileName,
-                FilePath = filePath,
-                Name = name
-            };
+            report.FilePath = filePath;
+            report.FileName = fileName;
 
-            _context.ReportDatas.Add(reportData);
+            _context.ReportDatas.Add(report);
             await _context.SaveChangesAsync();
 
-            return reportData;
-        }
-
-        public async Task DeleteReportAsync(int id)
-        {
-            var reportData = await _context.ReportDatas.FindAsync(id)
-                ?? throw new KeyNotFoundException($"Report with ID {id} not found.");
-
-            if (File.Exists(reportData.FilePath))
-            {
-                File.Delete(reportData.FilePath);
-            }
-
-            _context.ReportDatas.Remove(reportData);
-            await _context.SaveChangesAsync();
-        }
-
-        public async Task<ReportData> GetReportAsync(int id)
-        {
-            return await _context.ReportDatas.FindAsync(id)
-                ?? throw new KeyNotFoundException($"Report with ID {id} not found.");
+            return report;
         }
 
         public async Task<IEnumerable<ReportData>> GetAllReportsAsync()
         {
-            return await _context.ReportDatas.AsNoTracking().ToListAsync();
+            return await _context.ReportDatas.ToListAsync();
         }
 
-        public async Task<ReportData> UpdateReportAsync(ReportData reportData)
+        public async Task<ReportData> GetReportAsync(int id)
         {
-            _context.Entry(reportData).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
-            return reportData;
+            return await _context.ReportDatas.FindAsync(id);
         }
 
-        public string GetExcelContent(ReportData reportData)
+        public async Task<ReportData> UpdateReportAsync(int id, ReportData report, Stream fileStream = null)
         {
-            if (string.IsNullOrEmpty(reportData.FilePath) || !File.Exists(reportData.FilePath))
-                throw new FileNotFoundException("Report file not found.");
+            var existing = await _context.ReportDatas.FindAsync(id);
+            if (existing == null) return null;
 
-            var sb = new StringBuilder();
-            var fileInfo = new FileInfo(reportData.FilePath);
+            existing.Name = report.Name;
 
-            using (var package = new ExcelPackage(fileInfo))
+            if (fileStream != null)
             {
-                foreach (ExcelWorksheet worksheet in package.Workbook.Worksheets)
+                // Удаляем старый файл
+                if (!string.IsNullOrEmpty(existing.FilePath) && System.IO.File.Exists(existing.FilePath))
                 {
-                    if (worksheet == null) continue;
-
-                    sb.AppendLine($"=== Лист: {worksheet.Name} ===");
-
-                    if (worksheet.Dimension == null)
-                    {
-                        sb.AppendLine("(пустой лист)");
-                        continue;
-                    }
-
-                    // Заголовки
-                    AppendExcelRow(sb, worksheet, 1);
-
-                    // Данные
-                    for (int row = 2; row <= worksheet.Dimension.End.Row; row++)
-                    {
-                        AppendExcelRow(sb, worksheet, row);
-                    }
-
-                    // Графики
-                    AppendDrawingsInfo(sb, worksheet);
-
-                    sb.AppendLine(new string('=', 50));
+                    System.IO.File.Delete(existing.FilePath);
                 }
+
+                // Сохраняем новый файл
+                var fileName = $"{Guid.NewGuid()}{Path.GetExtension(report.FileName)}";
+                var filePath = Path.Combine(_uploadsPath, fileName);
+
+                using (var fs = new FileStream(filePath, FileMode.Create))
+                {
+                    await fileStream.CopyToAsync(fs);
+                }
+
+                existing.FilePath = filePath;
+                existing.FileName = fileName;
             }
 
-            return sb.ToString();
+            await _context.SaveChangesAsync();
+            return existing;
         }
 
-        public FileStream GetExcelFileStream(ReportData reportData)
+        public async Task DeleteReportAsync(int id)
         {
-            if (string.IsNullOrEmpty(reportData.FilePath) || !File.Exists(reportData.FilePath))
-                throw new FileNotFoundException("Report file not found.");
+            var report = await _context.ReportDatas.FindAsync(id);
+            if (report == null) return;
 
-            return new FileStream(reportData.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        }
-
-        private void AppendExcelRow(StringBuilder sb, ExcelWorksheet worksheet, int row)
-        {
-            for (int col = 1; col <= worksheet.Dimension.End.Column; col++)
+            if (!string.IsNullOrEmpty(report.FilePath) && System.IO.File.Exists(report.FilePath))
             {
-                sb.Append($"{worksheet.Cells[row, col].Text?.Trim()}\t");
+                System.IO.File.Delete(report.FilePath);
             }
-            sb.AppendLine();
+
+            _context.ReportDatas.Remove(report);
+            await _context.SaveChangesAsync();
         }
 
-        private void AppendDrawingsInfo(StringBuilder sb, ExcelWorksheet worksheet)
+        public async Task<byte[]> ConvertToWordAsync(int id)
         {
-            if (worksheet.Drawings.Count == 0) return;
+            var report = await GetReportAsync(id);
+            if (report == null) return null;
 
-            sb.AppendLine($"\nГрафики на листе ({worksheet.Drawings.Count}):");
+            using var excelStream = new FileStream(report.FilePath, FileMode.Open, FileAccess.Read);
+            using var excelPackage = new ExcelPackage(excelStream);
+            using var wordStream = new MemoryStream();
 
-            foreach (ExcelDrawing drawing in worksheet.Drawings)
+            using (var wordDocument = WordprocessingDocument.Create(wordStream, WordprocessingDocumentType.Document))
             {
-                string drawingName = drawing.Name;
-                string drawingType = drawing.GetType().Name;
+                var mainPart = wordDocument.AddMainDocumentPart();
+                mainPart.Document = new Document();
+                var body = mainPart.Document.AppendChild(new Body());
 
-                sb.AppendLine($"- {drawingName} ({drawingType})");
+                foreach (var worksheet in excelPackage.Workbook.Worksheets.Where(w => w.Dimension != null))
+                {
+                    // Заголовок листа
+                    var titlePara = new Paragraph(new Run(new Text(worksheet.Name)));
+                    titlePara.ParagraphProperties = new ParagraphProperties(
+                        new ParagraphStyleId() { Val = "Heading1" }
+                    );
+                    body.AppendChild(titlePara);
+
+                    // Таблица
+                    var table = new Table();
+                    var tableProps = new TableProperties(
+                        new TableBorders(
+                            new TopBorder() { Val = BorderValues.Single, Size = 4 },
+                            new BottomBorder() { Val = BorderValues.Single, Size = 4 },
+                            new LeftBorder() { Val = BorderValues.Single, Size = 4 },
+                            new RightBorder() { Val = BorderValues.Single, Size = 4 },
+                            new InsideHorizontalBorder() { Val = BorderValues.Single, Size = 4 },
+                            new InsideVerticalBorder() { Val = BorderValues.Single, Size = 4 }
+                        )
+                    );
+                    table.AppendChild(tableProps);
+
+                    int rowCount = Math.Min(worksheet.Dimension.Rows, 100);
+                    int colCount = Math.Min(worksheet.Dimension.Columns, 20);
+
+                    for (int row = 1; row <= rowCount; row++)
+                    {
+                        var tableRow = new TableRow();
+                        for (int col = 1; col <= colCount; col++)
+                        {
+                            var cell = new TableCell();
+                            cell.Append(new Paragraph(new Run(new Text(worksheet.Cells[row, col].Text))));
+                            tableRow.Append(cell);
+                        }
+                        table.Append(tableRow);
+                    }
+                    body.Append(table);
+
+                    // Изображения графиков
+                    foreach (var drawing in worksheet.Drawings)
+                    {
+                        if (drawing is ExcelPicture picture)
+                        {
+                            using var ms = new MemoryStream();
+                            picture.Image.Save(ms, ImageFormat.Png);
+                            await AddImageToDocumentAsync(mainPart, body, ms.ToArray());
+                        }
+                        else if (drawing is ExcelChart chart)
+                        {
+                            using var chartImage = ConvertChartToImage(chart);
+                            using var imageStream = new MemoryStream();
+                            chartImage.Save(imageStream, ImageFormat.Png);
+                            await AddImageToDocumentAsync(mainPart, body, imageStream.ToArray());
+                        }
+                    }
+
+                    // Разрыв страницы
+                    body.Append(new Paragraph(new Run(new Break() { Type = BreakValues.Page })));
+                }
+                mainPart.Document.Save();
             }
+
+            return wordStream.ToArray();
+        }
+
+        private Bitmap ConvertChartToImage(ExcelChart chart)
+        {
+            // В реальном проекте используйте библиотеку для рендеринга
+            var bitmap = new Bitmap(800, 600);
+            using var graphics = Graphics.FromImage(bitmap);
+            graphics.Clear(System.Drawing.Color.White);
+            graphics.DrawString($"Chart: {chart.Name}",
+                new System.Drawing.Font("Arial", 16),
+                Brushes.Black,
+                new PointF(50, 50));
+            return bitmap;
+        }
+
+        private async Task AddImageToDocumentAsync(
+            MainDocumentPart mainPart,
+            Body body,
+            byte[] imageBytes)
+        {
+            var imagePart = mainPart.AddImagePart(ImagePartType.Png);
+            using var stream = new MemoryStream(imageBytes);
+            imagePart.FeedData(stream);
+
+            var imageId = mainPart.GetIdOfPart(imagePart);
+
+            var element = new Drawing(
+                new DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline(
+                    new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent() { Cx = 5000000L, Cy = 3000000L },
+                    new DocumentFormat.OpenXml.Drawing.Wordprocessing.DocProperties() { Id = 1U, Name = "Chart" },
+                    new DocumentFormat.OpenXml.Drawing.Graphic(
+                        new DocumentFormat.OpenXml.Drawing.GraphicData(
+                            new DocumentFormat.OpenXml.Drawing.Pictures.Picture(
+                                new DocumentFormat.OpenXml.Drawing.Pictures.BlipFill(
+                                    new DocumentFormat.OpenXml.Drawing.Blip() { Embed = imageId }
+                                ),
+                                new DocumentFormat.OpenXml.Drawing.Pictures.ShapeProperties(
+                                    new DocumentFormat.OpenXml.Drawing.Transform2D(
+                                        new DocumentFormat.OpenXml.Drawing.Offset() { X = 0L, Y = 0L },
+                                        new DocumentFormat.OpenXml.Drawing.Extents() { Cx = 5000000L, Cy = 3000000L }
+                                    ),
+                                    new DocumentFormat.OpenXml.Drawing.PresetGeometry(
+                                        new DocumentFormat.OpenXml.Drawing.AdjustValueList()
+                                    )
+                                    { Preset = DocumentFormat.OpenXml.Drawing.ShapeTypeValues.Rectangle }
+                                )
+                            )
+                        )
+                        { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" }
+                    )
+                )
+            );
+
+            body.Append(new Paragraph(new Run(element)));
         }
     }
 }

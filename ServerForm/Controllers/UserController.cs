@@ -100,8 +100,8 @@ namespace ServerForm.Controllers
         }
 
 
-        // Авторизация
-        [HttpPost("{UserId}")]
+        // Post: api/user/login
+        [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest loginRequest)
         {
             if (loginRequest == null || string.IsNullOrEmpty(loginRequest.Email)
