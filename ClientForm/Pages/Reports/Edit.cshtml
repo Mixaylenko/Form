@@ -1,0 +1,37 @@
+﻿@page
+@model ClientForm.Pages.Reports.EditModel
+@{
+    ViewData["Title"] = "Редактирование отчета";
+}
+
+<div class="container mt-4">
+    <h2>Редактирование отчета</h2>
+
+    <form method="post" enctype="multipart/form-data">
+        <input type="hidden" asp-for="Id" />
+
+        <div class="form-group mb-3">
+            <label asp-for="Input.Name" class="control-label">Название отчета</label>
+            <input asp-for="Input.Name" class="form-control" />
+            <span asp-validation-for="Input.Name" class="text-danger"></span>
+        </div>
+
+        <div class="form-group mb-3">
+            <label class="control-label">Текущий файл</label>
+            <div class="form-control-plaintext">@Model.CurrentFileName</div>
+        </div>
+
+        <div class="form-group mb-3">
+            <label asp-for="Input.File" class="control-label">Новый файл (оставьте пустым, чтобы не изменять)</label>
+            <input asp-for="Input.File" type="file" class="form-control" />
+            <span asp-validation-for="Input.File" class="text-danger"></span>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Сохранить</button>
+        <a asp-page="Index" class="btn btn-secondary">Отмена</a>
+    </form>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

@@ -1,0 +1,31 @@
+﻿@page
+@model ClientForm.Pages.Reports.IndexModel
+@{
+    ViewData["Title"] = "Отчеты";
+}
+
+<div class="container mt-4">
+    <h2>Список отчетов</h2>
+
+    <a asp-page="Create" class="btn btn-primary mb-3">Создать новый отчет</a>
+
+    <div class="list-group">
+        @foreach (var report in Model.Reports)
+        {
+            <div class="list-group-item">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5>@report.Name</h5>
+                        <small>@report.FileName</small>
+                    </div>
+                    <div>
+                        <a asp-page="Details" asp-route-id="@report.Id" class="btn btn-sm btn-info">Просмотр</a>
+                        <a asp-page="Edit" asp-route-id="@report.Id" class="btn btn-sm btn-warning">Редакт.</a>
+                        <a asp-page="Download" asp-route-id="@report.Id" class="btn btn-sm btn-success">Скачать</a>
+                        <a asp-page="Delete" asp-route-id="@report.Id" class="btn btn-sm btn-danger">Удалить</a>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>

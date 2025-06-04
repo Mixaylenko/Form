@@ -1,0 +1,31 @@
+﻿/* Основные стили для всего приложения */
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f8f9fa; /* Светлый фон */
+    color: #343a40; /* Темный текст */
+}
+
+/* Стили для заголовков */
+h1, h2, h3 {
+    color: #007bff; /* Цвет заголовков */
+}
+
+/* Стили для кнопок */
+.btn-custom {
+    background-color: #28a745; /* Зеленый фон */
+    color: white; /* Белый текст */
+}
+
+    .btn-custom:hover {
+        background-color: #218838; /* Темный зеленый при наведении */
+    }
+
+/* Стили для карточек */
+.card {
+    margin: 20px; /* Отступы вокруг карточек */
+    border: 1px solid #dee2e6; /* Светлая граница */
+}
+
+.card-title {
+    font-weight: bold; /* Жирный шрифт для заголовка карточки */
+}

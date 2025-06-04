@@ -1,0 +1,42 @@
+﻿@page
+@model ClientForm.Pages.IndexModel
+@{
+    ViewData["Title"] = "Главная страница";
+    Layout = "_Layout";
+}
+
+<div class="container text-center mt-5">
+    <h1 class="display-4">Добро пожаловать</h1>
+
+    @if (User.Identity?.IsAuthenticated ?? false)
+    {
+        <p class="lead mt-4">Вы авторизованы как @User.Identity.Name</p>
+
+        @if (Model.Reports.Any())
+        {
+            <div class="mt-4">
+                <h3>Ваши последние отчеты</h3>
+                <div class="list-group mt-3 mx-auto" style="max-width: 600px;">
+                    @foreach (var report in Model.Reports.Take(3))
+                    {
+                        <a href="/Report/Details/@report.Id" class="list-group-item list-group-item-action">
+                        </a>
+                    }
+                </div>
+            </div>
+        }
+
+    }
+    else
+    {
+        <p class="lead mt-4">Пожалуйста, войдите в систему</p>
+        <div class="d-flex justify-content-center gap-3 mt-4">
+            <a asp-page="/Auth/Login" class="btn btn-primary btn-lg px-4">
+                Войти
+            </a>
+            <a asp-page="/Auth/Register" class="btn btn-outline-secondary btn-lg px-4">
+                Регистрация
+            </a>
+        </div>
+    }
+</div>

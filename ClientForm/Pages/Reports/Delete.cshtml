@@ -1,0 +1,38 @@
+﻿@page "/Reports/Delete/{id}"
+@model ClientForm.Pages.Reports.DeleteModel
+
+@{
+    ViewData["Title"] = "Delete Report";
+}
+
+<div class="container mt-4">
+    <h2>@ViewData["Title"]</h2>
+    <hr />
+
+    <div class="alert alert-warning">
+        <h4>Are you sure you want to delete this report?</h4>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6">
+            <dl class="row">
+                <dt class="col-sm-4">Report Name:</dt>
+                <dd class="col-sm-8">@Model.Report.Name</dd>
+
+                <dt class="col-sm-4">File Name:</dt>
+                <dd class="col-sm-8">@Model.Report.FileName</dd>
+
+                <dt class="col-sm-4">Created:</dt>
+                <dd class="col-sm-8">@Model.Report.Id</dd>
+            </dl>
+        </div>
+    </div>
+
+    <form method="post">
+        <input type="hidden" asp-for="Report.Id" />
+        <div class="form-group mt-4">
+            <button type="submit" class="btn btn-danger">Delete</button>
+            <a asp-page="./Index" class="btn btn-secondary ml-2">Cancel</a>
+        </div>
+    </form>
+</div>
