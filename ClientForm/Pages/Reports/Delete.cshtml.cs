@@ -5,7 +5,7 @@ using ClientForm.Services;
 using Microsoft.AspNetCore.Authorization;
 using ClientForm.Models;
 
-namespace ClientForm.Pages.Report
+namespace ClientForm.Pages.Reports
 {
     [Authorize]
     public class DeleteModel : PageModel
@@ -31,11 +31,21 @@ namespace ClientForm.Pages.Report
         {
             try
             {
-                Report = await _reportService.GetReportAsync(id);
-                if (Report == null)
+                var serverReport = await _reportService.GetReportAsync(id);
+                if (serverReport == null)
                 {
                     return NotFound();
                 }
+
+                // Преобразование ServerForm.Models.ReportData в ClientForm.Models.ReportData
+                Report = new ClientForm.Models.ReportData
+                {
+                    Id = serverReport.Id,
+                    Name = serverReport.Name,
+                    FileName = serverReport.FileName,
+                    // Добавьте все необходимые свойства
+                };
+
                 return Page();
             }
             catch (Exception ex)
