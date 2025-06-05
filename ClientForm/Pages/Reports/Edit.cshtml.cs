@@ -60,12 +60,6 @@ namespace ClientForm.Pages.Reports
 
         public async Task<IActionResult> OnPostAsync()
         {
-            if (!ModelState.IsValid)
-            {
-                await LoadCurrentFileName();
-                return Page();
-            }
-
             try
             {
                 using var content = new MultipartFormDataContent();
