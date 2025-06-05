@@ -45,9 +45,9 @@
 
     <script>
         // Динамическое обновление имени файла
-        document.getElementById('Input_File').addEventListener('change', function(e) {
+        document.getElementById('In_File').addEventListener('change', function(e) {
             const fileName = e.target.files[0].name;
-            document.querySelector('label[for="Input_File"]').textContent = `Файл: ${fileName}`;
+            document.querySelector('label[for="In_File"]').textContent = `Файл: ${fileName}`;
         });
     </script>
 }

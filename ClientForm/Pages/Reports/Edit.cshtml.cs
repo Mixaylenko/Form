@@ -127,7 +127,7 @@ namespace ClientForm.Pages.Reports
         [StringLength(100, ErrorMessage = "Название слишком длинное")]
         public string Name { get; set; }
 
-        [Display(Name = "Новый файл (необязательно)")]
+        [Display(Name = "Новый файл")]
         public IFormFile NewFile { get; set; }
     }
 
