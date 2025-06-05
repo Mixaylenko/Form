@@ -12,6 +12,7 @@ using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
 using A = DocumentFormat.OpenXml.Drawing;
 using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 using OfficeOpenXml.Drawing;
+using System.IO;
 
 namespace ServerForm.Services
 {
@@ -32,7 +33,10 @@ namespace ServerForm.Services
 
         public async Task<ReportData> CreateReportAsync(ReportData report, Stream fileStream)
         {
-            var fileName = $"{Guid.NewGuid()}{Path.GetExtension(report.FileName)}";
+            var extension = !string.IsNullOrEmpty(report.FileName)
+                ? Path.GetExtension(report.FileName)
+                : "";
+            var fileName = $"{Guid.NewGuid()}{extension}";
             var filePath = Path.Combine(_uploadsPath, fileName);
 
             using (var fs = new FileStream(filePath, FileMode.Create))
@@ -64,6 +68,7 @@ namespace ServerForm.Services
             var existing = await _context.ReportDatas.FindAsync(id);
             if (existing == null) return null;
 
+            // Всегда обновляем название отчета
             existing.Name = report.Name;
 
             if (fileStream != null)
@@ -74,8 +79,11 @@ namespace ServerForm.Services
                     System.IO.File.Delete(existing.FilePath);
                 }
 
-                // Сохраняем новый файл
-                var fileName = $"{Guid.NewGuid()}{Path.GetExtension(report.FileName)}";
+                // Генерируем новое имя файла с оригинальным расширением
+                var extension = !string.IsNullOrEmpty(report.FileName)
+                    ? Path.GetExtension(report.FileName)
+                    : "";
+                var fileName = $"{Guid.NewGuid()}{extension}";
                 var filePath = Path.Combine(_uploadsPath, fileName);
 
                 using (var fs = new FileStream(filePath, FileMode.Create))
@@ -85,6 +93,23 @@ namespace ServerForm.Services
 
                 existing.FilePath = filePath;
                 existing.FileName = fileName;
+            }
+            else if (!string.IsNullOrEmpty(report.FileName))
+            {
+                // Обновляем имя файла без замены самого файла
+                existing.FileName = report.FileName;
+
+                // Сохраняем оригинальное расширение
+                var extension = Path.GetExtension(existing.FilePath);
+                var newExtension = Path.GetExtension(report.FileName);
+
+                if (!string.Equals(extension, newExtension, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Обновляем расширение в пути файла
+                    var newPath = Path.ChangeExtension(existing.FilePath, newExtension);
+                    System.IO.File.Move(existing.FilePath, newPath);
+                    existing.FilePath = newPath;
+                }
             }
 
             await _context.SaveChangesAsync();

@@ -1,139 +1,119 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using OfficeOpenXml;
-using System.Drawing;
-using System.Drawing.Imaging;
-using OfficeOpenXml.Drawing.Chart;
-using OfficeOpenXml.Drawing;
-using ServerForm.Models;
+using System.ComponentModel.DataAnnotations;
+using System.Net.Http;
+using System.Net.Http.Json;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using System.IO;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using System;
 
 namespace ClientForm.Pages.Reports
 {
     public class DetailsModel : PageModel
     {
-        private readonly IWebHostEnvironment _env;
-        private readonly HttpClient _httpClient;
+        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly IConfiguration _configuration;
+        private readonly ILogger<DetailsModel> _logger;
+        private HttpClient _httpClient;
         private readonly string _apiBaseUrl;
-
-        public ReportData Report { get; set; }
-        public List<WorksheetModel> Worksheets { get; set; } = new();
 
         public DetailsModel(
             IHttpClientFactory httpClientFactory,
             IConfiguration configuration,
-            IWebHostEnvironment env)
+            ILogger<DetailsModel> logger)
         {
-            _httpClient = httpClientFactory.CreateClient();
-            _apiBaseUrl = configuration["ApiBaseUrl"];
-            _env = env;
-            ExcelPackage.LicenseContext = OfficeOpenXml.LicenseContext.NonCommercial;
+            _httpClientFactory = httpClientFactory;
+            _configuration = configuration;
+            _logger = logger;
+            _apiBaseUrl = _configuration["ApiBaseUrl"] ?? throw new ArgumentNullException("ApiBaseUrl");
         }
+
+        public ReportData Report { get; set; }
+        public bool IsExcel { get; set; }
+        public List<WorksheetPreview> Worksheets { get; set; } = new();
 
         public async Task<IActionResult> OnGetAsync(int id)
         {
-            var response = await _httpClient.GetAsync($"{_apiBaseUrl}/api/reports/{id}");
-            if (!response.IsSuccessStatusCode) return NotFound();
-
-            Report = await response.Content.ReadFromJsonAsync<ReportData>();
-            if (Report == null) return NotFound();
-
-            var filePath = Path.Combine(_env.WebRootPath, "uploads", Report.FileName);
-
-            // Проверка существования файла
-            if (!System.IO.File.Exists(filePath))
+            try
             {
-                ModelState.AddModelError(string.Empty, "Файл отчета не найден");
+                _httpClient = _httpClientFactory.CreateClient();
+                _httpClient.BaseAddress = new Uri(_apiBaseUrl);
+                _httpClient.Timeout = TimeSpan.FromSeconds(30);
+
+                // Загрузка основных данных отчета
+                var reportResponse = await _httpClient.GetAsync($"/api/Reports/{id}");
+                if (!reportResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogError("Failed to get report. Status: {StatusCode}", reportResponse.StatusCode);
+                    return NotFound();
+                }
+
+                Report = await reportResponse.Content.ReadFromJsonAsync<ReportData>();
+
+                // Проверка типа файла
+                var ext = Path.GetExtension(Report.FileName).ToLower();
+                IsExcel = ext == ".xlsx" || ext == ".xls";
+
+                if (IsExcel)
+                {
+                    // Загрузка данных для предпросмотра
+                    var previewResponse = await _httpClient.GetAsync($"/api/Reports/{id}/preview");
+                    if (previewResponse.IsSuccessStatusCode)
+                    {
+                        var preview = await previewResponse.Content.ReadFromJsonAsync<ReportPreview>();
+                        Worksheets = preview.Worksheets;
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to get preview. Status: {StatusCode}", previewResponse.StatusCode);
+                    }
+                }
+
                 return Page();
             }
-
-            using var package = new ExcelPackage(new FileInfo(filePath));
-
-            foreach (var worksheet in package.Workbook.Worksheets)
+            catch (HttpRequestException ex)
             {
-                var model = new WorksheetModel
-                {
-                    Name = worksheet.Name,
-                    TableData = new List<List<string>>(),
-                    Images = new List<ImageModel>()
-                };
-
-                // Обработка табличных данных
-                if (worksheet.Dimension != null)
-                {
-                    // Ограничим размер для безопасности
-                    int maxRows = Math.Min(worksheet.Dimension.End.Row, 100);
-                    int maxCols = Math.Min(worksheet.Dimension.End.Column, 20);
-
-                    for (int row = 1; row <= maxRows; row++)
-                    {
-                        var rowData = new List<string>();
-                        for (int col = 1; col <= maxCols; col++)
-                        {
-                            rowData.Add(worksheet.Cells[row, col].Text);
-                        }
-                        model.TableData.Add(rowData);
-                    }
-                }
-
-                // Обработка графиков - ИСПРАВЛЕННАЯ ЧАСТЬ
-                foreach (var drawing in worksheet.Drawings)
-                {
-                    if (drawing is ExcelChart chart) // Исправлено здесь
-                    {
-                        using var image = ConvertChartToImage(chart);
-                        using var ms = new MemoryStream();
-                        image.Save(ms, ImageFormat.Png);
-                        model.Images.Add(new ImageModel
-                        {
-                            Data = ms.ToArray(),
-                            AltText = chart.Name
-                        });
-                    }
-                    else if (drawing is ExcelPicture picture)
-                    {
-                        // Обработка обычных изображений
-                        using var ms = new MemoryStream();
-                        picture.Image.Save(ms, ImageFormat.Png);
-                        model.Images.Add(new ImageModel
-                        {
-                            Data = ms.ToArray(),
-                            AltText = picture.Name
-                        });
-                    }
-                }
-
-                Worksheets.Add(model);
+                _logger.LogError(ex, "API request failed");
+                return StatusCode(500, "Ошибка соединения с сервером");
             }
-
-            return Page();
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error");
+                return StatusCode(500, "Внутренняя ошибка сервера");
+            }
         }
 
-        // Исправленная сигнатура метода
-        private Bitmap ConvertChartToImage(ExcelChart chart) // Исправлено здесь
+        public class ReportData
         {
-            var bitmap = new Bitmap(600, 400);
-            using var g = Graphics.FromImage(bitmap);
-            g.Clear(Color.White);
-            g.DrawString(chart.Name, new Font("Arial", 14), Brushes.Black, 10, 10);
-
-            // Простая визуализация для примера
-            g.DrawRectangle(Pens.Black, 50, 50, 500, 300);
-            g.DrawString("Chart Placeholder", new Font("Arial", 20), Brushes.Blue, 100, 150);
-
-            return bitmap;
+            public int Id { get; set; }
+            public string Name { get; set; }
+            public string FileName { get; set; }
+            public string FilePath { get; set; }
         }
 
-        public class WorksheetModel
+        public class ReportPreview
+        {
+            public int ReportId { get; set; }
+            public string ReportName { get; set; }
+            public string FileName { get; set; }
+            public List<WorksheetPreview> Worksheets { get; set; }
+        }
+
+        public class WorksheetPreview
         {
             public string Name { get; set; }
             public List<List<string>> TableData { get; set; }
-            public List<ImageModel> Images { get; set; }
+            public List<ImagePreview> Images { get; set; }
         }
 
-        public class ImageModel
+        public class ImagePreview
         {
-            public byte[] Data { get; set; }
-            public string AltText { get; set; }
+            public string Name { get; set; }
+            public string Format { get; set; }
+            public byte[] ImageData { get; set; }
         }
     }
 }

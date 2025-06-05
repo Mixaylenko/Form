@@ -1,55 +1,110 @@
 ﻿@page
 @model ClientForm.Pages.Reports.DetailsModel
 @{
-    ViewData["Title"] = "Report Details";
+    ViewData["Title"] = "Детали отчета";
 }
 
-<div class="container">
-    <h1>@Model.Report.Name</h1>
-    <p>File: @Model.Report.FileName</p>
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>@Model.Report.Name</h2>
+        <div>
+            <a asp-page="Edit" asp-route-id="@Model.Report.Id" class="btn btn-warning">Редактировать</a>
+            <a asp-page="Download" asp-route-id="@Model.Report.Id" class="btn btn-success">Скачать Excel</a>
+            <a asp-page="Download" asp-route-id="@Model.Report.Id" asp-route-format="word" class="btn btn-primary">Скачать Word</a>
+            <a asp-page="Index" class="btn btn-secondary">Назад</a>
+        </div>
+    </div>
 
-    @foreach (var worksheet in Model.Worksheets)
+    <div class="card mb-4">
+        <div class="card-header">
+            Информация о файле
+        </div>
+        <div class="card-body">
+            <p><strong>Имя файла:</strong> @Model.Report.FileName</p>
+        </div>
+    </div>
+
+    @if (Model.IsExcel)
     {
-        <div class="worksheet-section mb-5">
-            <h2>@worksheet.Name</h2>
-
-            @if (worksheet.TableData.Any())
-            {
-                <div class="table-responsive mb-4">
-                    <table class="table table-bordered table-striped">
-                        @foreach (var row in worksheet.TableData)
-                        {
-                            <tr>
-                                @foreach (var cell in row)
-                                {
-                                    <td>@cell</td>
-                                }
-                            </tr>
-                        }
-                    </table>
-                </div>
-            }
-
-            @if (worksheet.Images.Any())
-            {
-                <div class="chart-container">
-                    @foreach (var image in worksheet.Images)
+        <div class="card">
+            <div class="card-header">
+                Просмотр Excel файла
+            </div>
+            <div class="card-body">
+                <ul class="nav nav-tabs" id="excelTabs" role="tablist">
+                    @for (int i = 0; i < Model.Worksheets.Count; i++)
                     {
-                        <div class="mb-4">
-                            <img src="data:image/png;base64,@Convert.ToBase64String(image.Data)"
-                                 alt="@image.AltText"
-                                 class="img-fluid border rounded shadow" />
-                            <p class="text-center mt-2">@image.AltText</p>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link @(i == 0 ? "active" : "")"
+                                    id="tab-@i"
+                                    data-bs-toggle="tab"
+                                    data-bs-target="#sheet-@i"
+                                    type="button"
+                                    role="tab">
+                                @Model.Worksheets[i].Name
+                            </button>
+                        </li>
+                    }
+                </ul>
+
+                <div class="tab-content p-3 border border-top-0" id="excelTabContent">
+                    @for (int i = 0; i < Model.Worksheets.Count; i++)
+                    {
+                        var worksheet = Model.Worksheets[i];
+                        <div class="tab-pane fade @(i == 0 ? "show active" : "")"
+                             id="sheet-@i"
+                             role="tabpanel">
+
+                            @if (worksheet.TableData.Any())
+                            {
+                                <div class="table-responsive mb-4">
+                                    <table class="table table-bordered table-sm">
+                                        @foreach (var row in worksheet.TableData)
+                                        {
+                                            <tr>
+                                                @foreach (var cell in row)
+                                                {
+                                                    <td>@cell</td>
+                                                }
+                                            </tr>
+                                        }
+                                    </table>
+                                </div>
+                            }
+
+                            @if (worksheet.Images.Any())
+                            {
+                                <h5>Графики и изображения</h5>
+                                <div class="row">
+                                    @foreach (var image in worksheet.Images)
+                                    {
+                                        <div class="col-md-6 mb-3">
+                                            <div class="card">
+                                                <div class="card-body">
+                                                    <img src="data:image/@image.Format.ToLower();base64,@Convert.ToBase64String(image.ImageData)"
+                                                         class="img-fluid"
+                                                         alt="@image.Name" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
                         </div>
                     }
                 </div>
-            }
+            </div>
         </div>
     }
-
-    <div class="mt-4">
-        <a asp-page="Index" class="btn btn-secondary">Back to List</a>
-        <a asp-page="Download" asp-route-id="@Model.Report.Id" class="btn btn-primary">Download Excel</a>
-        <a asp-page="ConvertToWord" asp-route-id="@Model.Report.Id" class="btn btn-success">Convert to Word</a>
-    </div>
+    else
+    {
+        <div class="card">
+            <div class="card-header">
+                Содержимое файла
+            </div>
+            <div class="card-body">
+                <p>Предпросмотр доступен только для Excel файлов. Используйте кнопку "Скачать" для загрузки файла.</p>
+            </div>
+        </div>
+    }
 </div>
