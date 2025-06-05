@@ -10,7 +10,7 @@ namespace ServerForm.Interfaces
         Task<ReportData> CreateReportAsync(ReportData report, Stream fileStream);
         Task<IEnumerable<ReportData>> GetAllReportsAsync();
         Task<ReportData> GetReportAsync(int id);
-        Task<ReportData> UpdateReportAsync(int id, ReportData report, Stream fileStream = null);
+        Task<ReportData> UpdateReportAsync(int id, ReportData report, Stream fileStream = null, string originalFileName = null);
         Task DeleteReportAsync(int id);
         Task<byte[]> ConvertToWordAsync(int id);
     }

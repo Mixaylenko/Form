@@ -10,6 +10,7 @@ using OfficeOpenXml.Drawing;
 using OfficeOpenXml;
 using System.Drawing.Imaging;
 using System.Drawing;
+using System.ComponentModel.DataAnnotations;
 
 namespace ServerForm.Controllers
 {
@@ -51,17 +52,42 @@ namespace ServerForm.Controllers
             return CreatedAtAction(nameof(GetReport), new { id = created.Id }, created);
         }
 
-        [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateReport(
-            int id,
-            [FromForm] string name,
-            IFormFile file = null)
+        [HttpPut("update/{id}")]
+        public async Task<IActionResult> UpdateReport(int id, [FromForm] UpdateReportRequest request)
         {
-            var report = new ReportData { Name = name };
-            Stream stream = file != null ? file.OpenReadStream() : null;
+            // Проверяем только обязательное поле Name
+            if (string.IsNullOrEmpty(request.Name))
+            {
+                ModelState.AddModelError("Name", "Название отчета обязательно");
+                return BadRequest(ModelState);
+            }
 
-            var updated = await _reportService.UpdateReportAsync(id, report, stream);
-            return updated != null ? NoContent() : NotFound();
+            var reportData = new ReportData
+            {
+                Name = request.Name
+            };
+
+            Stream fileStream = null;
+            string fileName = null;
+
+            // Файл не обязателен - обрабатываем только если предоставлен
+            if (request.File != null && request.File.Length > 0)
+            {
+                fileStream = request.File.OpenReadStream();
+                fileName = request.File.FileName;
+            }
+
+            var updatedReport = await _reportService.UpdateReportAsync(
+                id,
+                reportData,
+                fileStream,
+                fileName
+            );
+
+            if (updatedReport == null)
+                return NotFound();
+
+            return Ok(updatedReport);
         }
 
         [HttpDelete("{id}")]
@@ -166,7 +192,13 @@ namespace ServerForm.Controllers
             public List<List<string>> TableData { get; set; }
             public List<ImagePreview> Images { get; set; }
         }
-
+        public class UpdateReportRequest
+        {
+            [Required(ErrorMessage = "Название отчета обязательно")]
+            public string Name { get; set; }
+            [Required(ErrorMessage = "Файл обязательно")]
+            public IFormFile File { get; set; }
+        }
         public class ImagePreview
         {
             public string Name { get; set; }
@@ -190,7 +222,7 @@ namespace ServerForm.Controllers
                 return bitmap;
             }
         }
-        [HttpGet("{id}/download")]
+        [HttpGet("download/{id}")]
         public async Task<IActionResult> DownloadReport(int id)
         {
             var report = await _reportService.GetReportAsync(id);
@@ -200,7 +232,7 @@ namespace ServerForm.Controllers
             return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", report.FileName);
         }
 
-        [HttpGet("{id}/convert-to-word")]
+        [HttpGet("convert-to-word/{id}")]
         public async Task<IActionResult> ConvertToWord(int id)
         {
             var wordBytes = await _reportService.ConvertToWordAsync(id);

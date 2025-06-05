@@ -13,6 +13,7 @@ using A = DocumentFormat.OpenXml.Drawing;
 using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 using OfficeOpenXml.Drawing;
 using System.IO;
+using Microsoft.Office.Interop.Excel;
 
 namespace ServerForm.Services
 {
@@ -33,8 +34,8 @@ namespace ServerForm.Services
 
         public async Task<ReportData> CreateReportAsync(ReportData report, Stream fileStream)
         {
-            var extension = !string.IsNullOrEmpty(report.FileName)
-                ? Path.GetExtension(report.FileName)
+            var extension = !string.IsNullOrEmpty(report.FileName) 
+                ? Path.GetExtension(report.FileName) 
                 : "";
             var fileName = $"{Guid.NewGuid()}{extension}";
             var filePath = Path.Combine(_uploadsPath, fileName);
@@ -63,7 +64,7 @@ namespace ServerForm.Services
             return await _context.ReportDatas.FindAsync(id);
         }
 
-        public async Task<ReportData> UpdateReportAsync(int id, ReportData report, Stream fileStream = null)
+        public async Task<ReportData> UpdateReportAsync(int id, ReportData report, Stream fileStream = null, string originalFileName = null)
         {
             var existing = await _context.ReportDatas.FindAsync(id);
             if (existing == null) return null;
@@ -79,10 +80,11 @@ namespace ServerForm.Services
                     System.IO.File.Delete(existing.FilePath);
                 }
 
-                // Генерируем новое имя файла с оригинальным расширением
-                var extension = !string.IsNullOrEmpty(report.FileName)
-                    ? Path.GetExtension(report.FileName)
+                // Сохраняем оригинальное расширение из нового файла
+                var extension = !string.IsNullOrEmpty(originalFileName)
+                    ? Path.GetExtension(originalFileName)
                     : "";
+
                 var fileName = $"{Guid.NewGuid()}{extension}";
                 var filePath = Path.Combine(_uploadsPath, fileName);
 
@@ -91,26 +93,11 @@ namespace ServerForm.Services
                     await fileStream.CopyToAsync(fs);
                 }
 
+                // Обновляем путь и имя файла
                 existing.FilePath = filePath;
                 existing.FileName = fileName;
             }
-            else if (!string.IsNullOrEmpty(report.FileName))
-            {
-                // Обновляем имя файла без замены самого файла
-                existing.FileName = report.FileName;
-
-                // Сохраняем оригинальное расширение
-                var extension = Path.GetExtension(existing.FilePath);
-                var newExtension = Path.GetExtension(report.FileName);
-
-                if (!string.Equals(extension, newExtension, StringComparison.OrdinalIgnoreCase))
-                {
-                    // Обновляем расширение в пути файла
-                    var newPath = Path.ChangeExtension(existing.FilePath, newExtension);
-                    System.IO.File.Move(existing.FilePath, newPath);
-                    existing.FilePath = newPath;
-                }
-            }
+            // Если файл не меняется, оставляем текущее имя и путь
 
             await _context.SaveChangesAsync();
             return existing;
@@ -201,7 +188,6 @@ namespace ServerForm.Services
                             await AddImageToDocumentAsync(mainPart, body, imageStream.ToArray());
                         }
                     }
-
                     // Разрыв страницы
                     body.Append(new Paragraph(new Run(new Break() { Type = BreakValues.Page })));
                 }
@@ -235,7 +221,7 @@ namespace ServerForm.Services
 
             var imageId = mainPart.GetIdOfPart(imagePart);
 
-            var element = new Drawing(
+            var element = new DocumentFormat.OpenXml.Office.Drawing.Drawing(
                 new DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline(
                     new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent() { Cx = 5000000L, Cy = 3000000L },
                     new DocumentFormat.OpenXml.Drawing.Wordprocessing.DocProperties() { Id = 1U, Name = "Chart" },

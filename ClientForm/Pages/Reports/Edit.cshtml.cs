@@ -64,19 +64,20 @@ namespace ClientForm.Pages.Reports
             {
                 using var content = new MultipartFormDataContent();
 
-                // Добавляем текстовые поля
-                content.Add(new StringContent(In.Name), "name");
+                // Всегда добавляем название отчета
+                content.Add(new StringContent(In.Name), "Name");
 
-                // Добавляем файл только если он был предоставлен
+                // Добавляем файл 
                 if (In.NewFile != null && In.NewFile.Length > 0)
                 {
                     var fileContent = new StreamContent(In.NewFile.OpenReadStream());
                     fileContent.Headers.ContentType = new MediaTypeHeaderValue(In.NewFile.ContentType);
+
+                    // Передаем оригинальное имя файла
                     content.Add(fileContent, "file", In.NewFile.FileName);
                 }
-
                 var response = await _httpClient.PutAsync(
-                    $"{_apiBaseUrl}/api/reports/{Id}",
+                    $"{_apiBaseUrl}/api/reports/update/{Id}",
                     content);
 
                 if (response.IsSuccessStatusCode)
@@ -84,9 +85,10 @@ namespace ClientForm.Pages.Reports
                     return RedirectToPage("Details", new { id = Id });
                 }
 
-                var errorMessage = await response.Content.ReadAsStringAsync();
+                // Читаем сообщение об ошибке
+                var errorContent = await response.Content.ReadAsStringAsync();
                 ModelState.AddModelError(string.Empty,
-                    $"Ошибка при обновлении: {response.StatusCode} - {errorMessage}");
+                    $"Ошибка при обновлении: {response.StatusCode} - {errorContent}");
             }
             catch (Exception ex)
             {
