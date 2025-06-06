@@ -136,34 +136,6 @@ namespace ServerForm.Controllers
                         wsPreview.TableData.Add(rowData);
                     }
 
-                    // Обработка изображений и графиков
-                    foreach (var drawing in worksheet.Drawings)
-                    {
-                        if (drawing is ExcelPicture picture)
-                        {
-                            using var ms = new MemoryStream();
-                            picture.Image.Save(ms, ImageFormat.Png);
-                            wsPreview.Images.Add(new ImagePreview
-                            {
-                                Name = picture.Name,
-                                Format = "PNG",
-                                ImageData = ms.ToArray()
-                            });
-                        }
-                        else if (drawing is ExcelChart chart)
-                        {
-                            using var chartImage = new ChartRenderer().RenderChart(chart);
-                            using var imageStream = new MemoryStream();
-                            chartImage.Save(imageStream, ImageFormat.Png);
-                            wsPreview.Images.Add(new ImagePreview
-                            {
-                                Name = chart.Name,
-                                Format = "PNG",
-                                ImageData = imageStream.ToArray()
-                            });
-                        }
-                    }
-
                     worksheets.Add(wsPreview);
                 }
             }
