@@ -21,6 +21,8 @@ using Drawing = DocumentFormat.OpenXml.Wordprocessing.Drawing;
 using Style = DocumentFormat.OpenXml.Wordprocessing.Style;
 using Styles = DocumentFormat.OpenXml.Wordprocessing.Styles;
 using Color = System.Drawing.Color;
+using System.Diagnostics;
+using System.Threading.Tasks;
 
 namespace ServerForm.Services
 {
@@ -129,194 +131,155 @@ namespace ServerForm.Services
             var report = await GetReportAsync(id);
             if (report == null) return null;
 
-            using var excelStream = new FileStream(report.FilePath, FileMode.Open, FileAccess.Read);
-            using var excelPackage = new ExcelPackage(excelStream);
-            using var wordStream = new MemoryStream();
+            // Создаем временную копию файла для работы
+            var tempExcelFile = Path.GetTempFileName() + Path.GetExtension(report.FileName);
+            System.IO.File.Copy(report.FilePath, tempExcelFile, true);
 
-            using (var wordDocument = WordprocessingDocument.Create(wordStream, WordprocessingDocumentType.Document))
+            var tempWordFile = Path.GetTempFileName() + ".docx";
+            var pythonScript = GeneratePythonScript(tempExcelFile, tempWordFile);
+
+            var scriptPath = Path.GetTempFileName() + ".py";
+            await System.IO.File.WriteAllTextAsync(scriptPath, pythonScript);
+
+            try
             {
-                var mainPart = wordDocument.AddMainDocumentPart();
-                mainPart.Document = new Document();
-                var body = mainPart.Document.AppendChild(new Body());
-
-                // Добавить стили для заголовков
-                var stylesPart = mainPart.AddNewPart<StyleDefinitionsPart>();
-                GenerateDocumentStyles(stylesPart);
-
-                foreach (var worksheet in excelPackage.Workbook.Worksheets.Where(w => w.Dimension != null))
+                var process = new Process();
+                process.StartInfo = new ProcessStartInfo
                 {
-                    // Заголовок листа
-                    var titlePara = new Paragraph(new Run(new Text(worksheet.Name)));
-                    titlePara.ParagraphProperties = new ParagraphProperties(
-                        new ParagraphStyleId() { Val = "Heading1" }
-                    );
-                    body.AppendChild(titlePara);
+                    FileName = "python",
+                    Arguments = $"\"{scriptPath}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
 
-                    // Таблица
-                    var table = new Table();
-                    var tableProps = new TableProperties(
-                        new TableBorders(
-                            new TopBorder() { Val = BorderValues.Single, Size = 4 },
-                            new BottomBorder() { Val = BorderValues.Single, Size = 4 },
-                            new LeftBorder() { Val = BorderValues.Single, Size = 4 },
-                            new RightBorder() { Val = BorderValues.Single, Size = 4 },
-                            new InsideHorizontalBorder() { Val = BorderValues.Single, Size = 4 },
-                            new InsideVerticalBorder() { Val = BorderValues.Single, Size = 4 }
-                        )
-                    );
-                    table.AppendChild(tableProps);
+                process.Start();
+                await process.WaitForExitAsync();
 
-                    int rowCount = Math.Min(worksheet.Dimension.Rows, 100);
-                    int colCount = Math.Min(worksheet.Dimension.Columns, 20);
-
-                    for (int row = 1; row <= rowCount; row++)
-                    {
-                        var tableRow = new TableRow();
-                        for (int col = 1; col <= colCount; col++)
-                        {
-                            var cell = new TableCell();
-                            cell.Append(new Paragraph(new Run(new Text(worksheet.Cells[row, col].Text))));
-                            tableRow.Append(cell);
-                        }
-                        table.Append(tableRow);
-                    }
-                    body.Append(table);
-
-                    // Изображения графиков
-                    foreach (var drawing in worksheet.Drawings)
-                    {
-                        try
-                        {
-                            if (drawing is ExcelPicture picture)
-                            {
-                                using var ms = new MemoryStream();
-                                picture.Image.Save(ms, ImageFormat.Png);
-                                await AddImageToDocumentAsync(mainPart, body, ms.ToArray());
-                            }
-                            else if (drawing is ExcelChart chart)
-                            {
-                                using var chartImage = ConvertChartToImage(chart);
-                                using var imageStream = new MemoryStream();
-                                chartImage.Save(imageStream, ImageFormat.Png);
-                                await AddImageToDocumentAsync(mainPart, body, imageStream.ToArray());
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            // Логирование ошибки вместо прерывания процесса
-                            var errorText = new Paragraph(new Run(new Text(
-                                $"Ошибка обработки элемента: {ex.Message}")));
-                            body.AppendChild(errorText);
-                        }
-                    }
-                    body.Append(new Paragraph(new Run(new Break() { Type = BreakValues.Page })));
+                if (process.ExitCode != 0)
+                {
+                    var error = await process.StandardError.ReadToEndAsync();
+                    throw new Exception($"Python error: {error}");
                 }
-                mainPart.Document.Save();
+
+                return await System.IO.File.ReadAllBytesAsync(tempWordFile);
             }
-            return wordStream.ToArray();
+            finally
+            {
+                // Гарантированное освобождение ресурсов
+                await Task.Delay(1000); // Даем время на завершение процессов
+                SafeDelete(tempExcelFile);
+                SafeDelete(tempWordFile);
+                SafeDelete(scriptPath);
+
+                // Удаление временных файлов Excel (типа ~$...)
+                var tempDir = Path.GetDirectoryName(tempExcelFile);
+                var lockFiles = Directory.GetFiles(tempDir, "~$" + Path.GetFileName(tempExcelFile));
+                foreach (var lockFile in lockFiles) SafeDelete(lockFile);
+            }
         }
 
-        private Bitmap ConvertChartToImage(ExcelChart chart)
+        // Добавьте эту вспомогательную функцию в класс
+        private void SafeDelete(string path)
         {
             try
             {
-                // Реальная реализация рендеринга графика
-                var bitmap = new Bitmap(800, 600);
-                using (var g = Graphics.FromImage(bitmap))
+
+                if (System.IO.File.Exists(path))
                 {
-                    g.Clear(Color.White);
-                    // Здесь должен быть код рендеринга графика
-                    // Для примера - заглушка с текстом
-                    g.DrawString($"График: {chart.Name}",
-                        new System.Drawing.Font("Arial", 14),
-                        Brushes.Black,
-                        new System.Drawing.PointF(50, 50));
+                    System.IO.File.Delete(path);
                 }
-                return bitmap;
             }
             catch
             {
-                // Возвращаем пустое изображение при ошибке
-                return new Bitmap(800, 600);
+                // Логирование ошибки при необходимости
             }
         }
 
-        private async Task AddImageToDocumentAsync(
-        MainDocumentPart mainPart,
-        Body body,
-        byte[] imageBytes)
+        private string GeneratePythonScript(string excelPath, string wordPath)
         {
-            try
-            {
-                var imagePart = mainPart.AddImagePart(ImagePartType.Png);
-                using (var stream = new MemoryStream(imageBytes))
-                {
-                    imagePart.FeedData(stream);
-                }
+            return $@"
+import win32com.client as win32
+import os
+import sys
+import pythoncom
 
-                var imageId = mainPart.GetIdOfPart(imagePart);
+def convert_excel_to_word(excel_path, word_path):
+    pythoncom.CoInitialize()  # Инициализация COM для потока
+    excel = None
+    word = None
+    
+    try:
+        excel = win32.Dispatch('Excel.Application', pythoncom.CoInitialize())
+        excel.Visible = False
+        excel.DisplayAlerts = False  # Отключаем предупреждения
+        
+        # Открываем книгу в режиме read-only
+        wb = excel.Workbooks.Open(
+            os.path.abspath(excel_path),
+            ReadOnly=True,
+            IgnoreReadOnlyRecommended=True
+        )
+        
+        word = win32.Dispatch('Word.Application')
+        word.Visible = False
+        doc = word.Documents.Add()
+        
+        # Обработка всех листов
+        for sheet in wb.Sheets:
+            # Добавляем название листа как заголовок
+            header = doc.Content
+            header.InsertAfter(f'Лист: {{sheet.Name}}\\n\\n')
+            
+            # Копируем данные
+            sheet.UsedRange.Copy()
+            doc.Content.PasteExcelTable(False, False, False)
+            doc.Content.InsertAfter('\\n\\n')
+        
+        doc.SaveAs(os.path.abspath(word_path))
+        
+    except Exception as e:
+        print(f""Ошибка конвертации: {{str(e)}}"", file=sys.stderr)
+        raise
+    finally:
+        # Гарантированное освобождение ресурсов в правильном порядке
+        try:
+            if 'doc' in locals() and doc:
+                doc.Close(SaveChanges=False)
+        except: pass
+        
+        try:
+            if 'wb' in locals() and wb:
+                wb.Close(SaveChanges=False)
+        except: pass
+        
+        try:
+            if excel:
+                excel.DisplayAlerts = True
+                excel.Quit()
+        except: pass
+        
+        try:
+            if word:
+                word.Quit()
+        except: pass
+        
+        # Принудительное освобождение COM-объектов
+        for obj in [excel, word, wb, doc, sheet]:
+            try:
+                while obj and win32._ole32_.CoReleaseServerProcess() == 0:
+                    pass
+            except: pass
+        
+        pythoncom.CoUninitialize()
 
-                // Использование правильного неймспейса
-                var element = new Drawing(
-                    new DW.Inline(
-                        new DW.Extent() { Cx = 5000000L, Cy = 3000000L },
-                        new DW.EffectExtent() { LeftEdge = 0L, RightEdge = 0L, TopEdge = 0L, BottomEdge = 0L },
-                        new DW.DocProperties() { Id = 1U, Name = "Chart" },
-                        new DW.NonVisualGraphicFrameDrawingProperties(
-                            new A.GraphicFrameLocks() { NoChangeAspect = true }),
-                        new A.Graphic(
-                            new A.GraphicData(
-                                new PIC.Picture(
-                                    new PIC.NonVisualPictureProperties(
-                                        new PIC.NonVisualDrawingProperties() { Id = 0U, Name = "Chart.png" },
-                                        new PIC.NonVisualPictureDrawingProperties()),
-                                    new PIC.BlipFill(
-                                        new A.Blip() { Embed = imageId },
-                                        new A.Stretch(new A.FillRectangle())),
-                                    new PIC.ShapeProperties(
-                                        new A.Transform2D(
-                                            new A.Offset() { X = 0L, Y = 0L },
-                                            new A.Extents() { Cx = 5000000L, Cy = 3000000L }),
-                                        new A.PresetGeometry(new A.AdjustValueList())
-                                        { Preset = A.ShapeTypeValues.Rectangle }))
-                            )
-                            { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" })
-                    )
-                    { DistanceFromTop = 0U, DistanceFromBottom = 0U, DistanceFromLeft = 0U, DistanceFromRight = 0U });
-
-                body.Append(new Paragraph(new Run(element)));
-            }
-            catch (Exception ex)
-            {
-                var errorText = new Paragraph(new Run(new Text(
-                    $"Ошибка вставки изображения: {ex.Message}")));
-                body.AppendChild(errorText);
-            }
+if __name__ == '__main__':
+    excel_path = r'{excelPath.Replace("\\", "\\\\")}'
+    word_path = r'{wordPath.Replace("\\", "\\\\")}'
+    convert_excel_to_word(excel_path, word_path)
+";
         }
 
-        // Исправление 5: Добавление базовых стилей документа
-        private void GenerateDocumentStyles(StyleDefinitionsPart stylesPart)
-        {
-            var styles = new Styles();
-            var style = new Style() { Type = StyleValues.Paragraph, StyleId = "Normal" };
-            style.Append(new StyleName() { Val = "Normal" });
-            style.Append(new PrimaryStyle());
-            styles.Append(style);
-
-            var heading1 = new Style() { Type = StyleValues.Paragraph, StyleId = "Heading1" };
-            heading1.Append(new StyleName() { Val = "Heading 1" });
-            heading1.Append(new BasedOn() { Val = "Normal" });
-            heading1.Append(new NextParagraphStyle() { Val = "Normal" });
-            heading1.Append(new StyleParagraphProperties(
-                new SpacingBetweenLines() { After = "100" },
-                new ContextualSpacing()));
-            heading1.Append(new StyleRunProperties(
-                new RunFonts() { Ascii = "Arial" },
-                new DocumentFormat.OpenXml.Wordprocessing.FontSize() { Val = "28" },
-                new Bold()));
-            styles.Append(heading1);
-
-            stylesPart.Styles = styles;
-        }
     }
 }
