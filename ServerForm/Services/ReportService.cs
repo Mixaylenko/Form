@@ -206,36 +206,50 @@ import sys
 import pythoncom
 
 def convert_excel_to_word(excel_path, word_path):
-    pythoncom.CoInitialize()  # Инициализация COM для потока
+    pythoncom.CoInitialize()
     excel = None
     word = None
     
     try:
-        excel = win32.Dispatch('Excel.Application', pythoncom.CoInitialize())
+        # Инициализация Excel
+        excel = win32.Dispatch('Excel.Application')
         excel.Visible = False
-        excel.DisplayAlerts = False  # Отключаем предупреждения
+        excel.DisplayAlerts = False
         
-        # Открываем книгу в режиме read-only
+        # Открытие файла в режиме read-only
         wb = excel.Workbooks.Open(
             os.path.abspath(excel_path),
             ReadOnly=True,
             IgnoreReadOnlyRecommended=True
         )
         
+        # Инициализация Word
         word = win32.Dispatch('Word.Application')
         word.Visible = False
         doc = word.Documents.Add()
         
-        # Обработка всех листов
+        # Создаем объект диапазона для вставки
+        rng = doc.Range()
+        rng.Collapse(0)  # Перемещаем в конец документа
+        
         for sheet in wb.Sheets:
-            # Добавляем название листа как заголовок
-            header = doc.Content
-            header.InsertAfter(f'Лист: {{sheet.Name}}\\n\\n')
+            # Добавляем заголовок листа
+            rng.InsertAfter(f'Лист: {{sheet.Name}}\\n\\n')
+            rng.Collapse(0)  # Перемещаем в конец
             
-            # Копируем данные
+            # Копируем данные листа
             sheet.UsedRange.Copy()
-            doc.Content.PasteExcelTable(False, False, False)
-            doc.Content.InsertAfter('\\n\\n')
+            
+            # Вставляем данные в текущую позицию
+            rng.PasteExcelTable(False, False, False)
+            
+            # Добавляем разрыв страницы после каждого листа
+            rng.InsertAfter('\\n\\n')
+            rng.Collapse(0)  # Перемещаем в конец
+            
+            # Обновляем диапазон (важно для больших документов)
+            rng = doc.Range(rng.End-1, rng.End-1)
+            rng.Collapse(0)
         
         doc.SaveAs(os.path.abspath(word_path))
         
@@ -243,7 +257,7 @@ def convert_excel_to_word(excel_path, word_path):
         print(f""Ошибка конвертации: {{str(e)}}"", file=sys.stderr)
         raise
     finally:
-        # Гарантированное освобождение ресурсов в правильном порядке
+        # Освобождение ресурсов
         try:
             if 'doc' in locals() and doc:
                 doc.Close(SaveChanges=False)
@@ -264,13 +278,6 @@ def convert_excel_to_word(excel_path, word_path):
             if word:
                 word.Quit()
         except: pass
-        
-        # Принудительное освобождение COM-объектов
-        for obj in [excel, word, wb, doc, sheet]:
-            try:
-                while obj and win32._ole32_.CoReleaseServerProcess() == 0:
-                    pass
-            except: pass
         
         pythoncom.CoUninitialize()
 
